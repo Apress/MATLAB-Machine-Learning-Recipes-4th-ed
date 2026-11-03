@@ -1,0 +1,23 @@
+s = load('HallTrainingData');
+[xTrain, yTrain] = deal(s.t, s.rUL);
+W = 20; % window size
+% Extract fixed windows & labels
+[X, Y] = extractWindows(xTrain, yTrain, W);
+mu = mean(X); sig = std(X); sig(sig==0) = 1;
+X = (X - mu) ./ sig; maxRUL = max(Y); Y = Y / maxRUL;
+% Train feedforward net
+layers = [ ...
+    featureInputLayer(W,'Normalization','none')
+    fullyConnectedLayer(64)
+    reluLayer
+    fullyConnectedLayer(1)
+    regressionLayer];
+options = trainingOptions('adam', ...
+    'MaxEpochs',150, ...
+    'MiniBatchSize',64, ...
+    'InitialLearnRate',0.005, ...
+    'Shuffle','every-epoch', ...
+    'Plots','training-progress', ...
+    'Verbose',0);
+net = trainNetwork(X, Y, layers, options);
+save('HallFFModel.mat','net','mu','sig','maxRUL','W');
