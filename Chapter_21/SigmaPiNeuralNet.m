@@ -1,0 +1,217 @@
+%% SIGMAPINEURALNET Sigma-pi neural net
+%% Forms
+% [y, d] = SigmaPiNeuralNet( action, x, d )
+%
+%% Description
+% Implements a sigma-pi neural net with online training
+% The data structure d holds the memory for the function.
+% You call the function in the following order:
+%
+% Get default data structure
+% d       = SigmaPiNeuralNet; 
+%
+% Initialize the filter. You can send an empty x.
+% [~, d]  = SigmaPiNeuralNet( 'initialize', x, d );
+%
+% Get the initial weights by using batch learning. The number of columns
+% of x should be at least twice the number of inputs
+% [y, d]  = SigmaPiNeuralNet( 'batch learning', x, d );
+%
+% Perform recursive learning. x is a column.
+% for k = 1:n
+%  [y(k), d]  = SigmaPiNeuralNet( 'recursive learning', x(:,k), d );
+% end
+%
+% After sufficient training you can use it without learning.
+% [y(k), d]  = SigmaPiNeuralNet( 'output', x(:,k), d );
+%
+%% Inputs
+% action  (1,:) Actions 'initialize', 'set constant', 'batch learning'
+%               'recursive learning', 'output'
+% x       (n,1)	Measurements
+% d       (.)   Data structure
+%               .w          (n,1)   Weights for each z
+%               .zI         {n}     Indices
+%               .c          (1,1)   Constant
+%               .kSigmoid   (:,1)   Constant of each sigma function
+%               .y          (:,1)   Training data
+%               .z          (:,1)   Products of x
+% 
+%% Outputs
+% y (:,1)   Neural net output
+% d (.)     Updated data structure
+%% References
+% None.
+
+function [y, d] = SigmaPiNeuralNet( action, x, d )
+
+% Demo or default data structure
+if( nargin < 1 )
+  if( nargout == 1)
+    y = DefaultDataStructure;
+  else
+    Demo;
+  end
+  return
+end
+
+switch lower(action)
+  case 'initialize'
+    d   = CreateZIndices( x, d );
+    d.w = zeros(size(d.zI,1)+1,1);
+    y   = [];
+
+  case 'set constant'
+    d.c = x;
+    y   = [];
+   
+  case 'batch learning'
+    [y, d] = BatchLearning( x, d );
+    
+  case 'recursive learning'
+    [y, d] = RecursiveLearning( x, d );
+  
+  case 'output'
+    [y, d] = NNOutput( x, d );
+
+  otherwise
+    error('%s is not an available action',action );
+end
+
+function d = CreateZIndices( x, d )
+%% SigmaPiNeuralNet>CreateZIndices
+% Create the indices, d = CreateZIndices( x, d )
+
+n     = length(x);
+m     = 0;
+nF    = factorial(n);
+for k = 1:n
+  m = m + nF/(factorial(n-k)*factorial(k));
+end
+
+d.z  = zeros(m,1);
+d.zI = cell(m,1);
+
+i   = 1;
+for k = 1:n
+	c = Combinations(1:n,k);
+	for j = 1:size(c,1)
+    d.zI{i} = c(j,:);
+    i       = i + 1;
+  end
+end
+d.nZ = m+1;
+
+function d = CreateZArray( x, d )
+%% SigmaPiNeuralNet>CreateZArray
+% Create an array of products of x, d = CreateZArray( x, d )
+
+d.z(1) = d.c;
+for k = 1:d.nZ-1
+  d.z(k+1) = 1;
+  for j = 1:length(d.zI(k))
+    d.z(k+1) = d.z(k)*x(d.zI{k}(j));
+  end
+end
+
+function [y, d] = RecursiveLearning( x, d )
+%% SigmaPiNeuralNet>RecursiveLearning
+% Recursive learning method
+%  [y, d] = RecursiveLearning( x, d )
+d   = CreateZArray( x, d );
+z   = d.z;
+d.p	= d.p - d.p*(z*z')*d.p/(1+z'*d.p*z);
+d.w	= d.w + d.p*z*(d.y - z'*d.w);
+y   = z'*d.w;
+
+function [y, d] = NNOutput( x, d )
+%% SigmaPiNeuralNet>NNOutput
+% Output without learning
+
+x   = SigmoidFun(x,d.kSigmoid);
+d   = CreateZArray( x, d );
+y   = d.z'*d.w;
+
+function [y, d] = BatchLearning( x, d )
+%% SigmaPiNeuralNet>BatchLearning
+% Batch Learning method
+
+n = size(x,2);
+
+z = zeros(d.nZ,n);
+
+x = SigmoidFun(x,d.kSigmoid);
+
+for k = 1:n  
+  d       = CreateZArray( x(:,k), d );
+  z(:,k)  = d.z;
+end
+
+d.w = (d.y'*pinv(z))';
+
+q   = z*z';
+f   = max(max(abs(q)))/1000;
+d.p = inv(q+f*eye(size(q,1))); % This prevents singular results
+y   = z'*d.w;
+
+function d = DefaultDataStructure
+%% SigmaPiNeuralNet>DefaultDataStructure
+% Return a default data structure
+
+d           = struct();
+d.w         = [];
+d.c         = 1; % Constant term
+d.zI        = {};
+d.z         = [];
+d.kSigmoid  = 0.0001;
+d.y         = [];
+
+function s = SigmoidFun( x, k )
+%% SigmaPiNeuralNet>SigmoidFun
+% Sigmoid function, SigmoidFun( x, k )
+
+kX  = k.*x;
+s   = (1-exp(-kX))./(1+exp(-kX));
+
+function Demo
+%% SigmaPiNeuralNet>Demo
+% Demonstrate a sigma-pi neural net for dynamic pressure
+x       = zeros(2,1);
+
+d       = SigmaPiNeuralNet;
+[~, d]  = SigmaPiNeuralNet( 'initialize', x, d );
+
+h       = linspace(10,10000);
+v       = linspace(10,400);
+v2      = v.^2;
+q       = 0.5*AtmDensity(h).*v2;
+
+n       = 5;
+x       = [h(1:n);v2(1:n)];
+d.y     = q(1:n)';
+[y, d]  = SigmaPiNeuralNet( 'batch learning', x, d );
+
+fprintf(1,'Batch Results\n#         Truth   Neural Net\n');
+for k = 1:length(y)
+  fprintf(1,'%d: %12.2f %12.2f\n',k,q(k),y(k));
+end
+
+n = length(h);
+y = zeros(1,n);
+x = [h;v2];
+for k = 1:n
+  d.y = q(k);
+  [y(k), d]  = SigmaPiNeuralNet( 'recursive learning', x(:,k), d );
+end
+
+yL = {'q (N/m^2)' 'v (m/s)' 'h (m)'};
+PlotSet(1:n,[y;q;v;h],'x label','Sample','y label',yL,...
+        'plot title',{'Dynamic Pressure' 'Velocity' 'Altitude'},...
+        'figure title','Sigma Pi NN','plot set',{[1 2] 3 4},...
+        'legend',{{'Truth' 'NN'} {} {}});
+
+
+
+%% Copyright
+% Copyright (c) 2023 Princeton Satellite Systems, Inc.
+% All rights reserved.
